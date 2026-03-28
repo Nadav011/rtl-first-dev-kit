@@ -1,14 +1,50 @@
-# Next.js Proxy and Direction
+# Next.js Proxy And Direction
 
-This file will hold App Router and direction notes.
+Use `proxy.ts` in Next.js 16, not `middleware.ts`, when steering locale or direction at the edge.
 
-## Sections to fill
+## `proxy.ts` Example
 
-- `proxy.ts` routing patterns
-- layout-level `dir` propagation
-- route grouping ideas
-- locale and direction handling
+```ts
+import { NextResponse, type NextRequest } from 'next/server';
 
-## Notes
+const RTL_LOCALES = new Set(['he', 'ar']);
 
-- Keep the examples aligned with Next.js 16 conventions.
+export function proxy(request: NextRequest) {
+  const locale = request.cookies.get('locale')?.value ?? 'he';
+  const response = NextResponse.next();
+  response.headers.set('x-locale', locale);
+  response.headers.set('x-dir', RTL_LOCALES.has(locale) ? 'rtl' : 'ltr');
+  return response;
+}
+```
+
+## Layout Propagation
+
+Read the headers once at the layout boundary and set `lang` + `dir` there:
+
+```tsx
+import { headers } from 'next/headers';
+
+export default async function RootLayout({
+  children,
+}: {
+  children: React.ReactNode;
+}) {
+  const headerStore = await headers();
+  const locale = headerStore.get('x-locale') ?? 'he';
+  const dir = headerStore.get('x-dir') ?? 'rtl';
+
+  return (
+    <html lang={locale} dir={dir}>
+      <body>{children}</body>
+    </html>
+  );
+}
+```
+
+## Rules
+
+- Set `dir` once at the document layout, not ad hoc per component.
+- Keep locale and direction derivation deterministic.
+- When a route depends on `cookies()` or `headers()`, treat it as dynamic and cache accordingly.
+- Component code should still use logical utilities even when the layout already has `dir=\"rtl\"`.
