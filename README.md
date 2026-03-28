@@ -8,7 +8,7 @@ This is a draft structure only. It does not claim the toolkit is complete, publi
 
 ## Layout
 
-- `tailwind/` - logical-direction mapping notes
+- `tailwind/` - logical-direction mapping notes and examples
 - `flutter/` - directional Flutter patterns
 - `nextjs/` - App Router and `dir` propagation notes
 - `biome/` - RTL linting ideas and policy notes

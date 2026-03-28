@@ -9,3 +9,8 @@ Placeholder for logical-direction mapping and examples.
 - `inset-s-` / `inset-e-` usage
 - directional icon rotation
 - helper examples that avoid physical left/right properties
+
+## Files
+
+- `mapping.md` - logical property mapping table
+- `logical-properties.md` - migration notes and examples

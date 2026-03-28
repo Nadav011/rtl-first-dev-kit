@@ -8,3 +8,8 @@ Placeholder for `dir` propagation, App Router patterns, and locale handling.
 - `dir` propagation through layout boundaries
 - locale-aware routes
 - RTL-safe component patterns
+
+## Files
+
+- `proxy-and-dir.md` - route and direction notes
+- `dir-propagation.md` - layout-level direction flow
