@@ -48,5 +48,24 @@ jobs:
                   if not text.strip():
                       raise ValueError(f'Empty markdown file: {path}')
           PY
+      - name: Validate SKILL.md files (frontmatter + guardrail)
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          GUARDRAIL_PREFIX = '<!-- SECURITY GUARDRAIL:'
+          errors = []
+          skill_files = [f for f in Path('.').rglob('SKILL.md') if '.git' not in f.parts]
+          for skill_file in skill_files:
+              content = skill_file.read_text(encoding='utf-8')
+              if not content.startswith('---'):
+                  errors.append(f'{skill_file}: missing YAML frontmatter')
+              elif GUARDRAIL_PREFIX not in content:
+                  errors.append(f'{skill_file}: missing SECURITY GUARDRAIL comment')
+          if errors:
+              for e in errors:
+                  print(f'ERROR: {e}')
+              raise SystemExit(1)
+          print(f'All {len(skill_files)} SKILL.md files valid')
+          PY
       - name: Check git diff hygiene
         run: git diff --check
