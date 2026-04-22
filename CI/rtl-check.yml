@@ -1,0 +1,174 @@
+name: RTL Check
+
+on:
+  pull_request:
+    paths:
+      - "**/*.tsx"
+      - "**/*.jsx"
+      - "**/*.css"
+      - "**/*.vue"
+
+jobs:
+  rtl-lint:
+    name: RTL Logical Properties Check
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install ripgrep
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y ripgrep
+
+      - name: Scan for physical direction classes
+        id: rtl-scan
+        run: |
+          # Pattern: physical direction classes that must be replaced with logical equivalents
+          # Suppression: any line containing "// rtl-ok" is skipped
+          #
+          # Classes checked:
+          #   ml-{n}  mr-{n}  pl-{n}  pr-{n}     — physical margin/padding
+          #   text-left  text-right                — physical text alignment
+          #   border-l-  border-r-                 — physical border sides
+          #   rounded-tl  rounded-tr               — physical border radius (corners)
+          #   rounded-bl  rounded-br
+          #   float-left  float-right              — physical float
+          #   left-{n}  right-{n}                  — physical inset positioning (when directional)
+
+          PATTERN='\bml-[0-9a-z\[]|\bmr-[0-9a-z\[]|\bpl-[0-9a-z\[]|\bpr-[0-9a-z\[]|text-left\b|text-right\b|border-l-|border-r-|\brounded-tl\b|\brounded-tr\b|\brounded-bl\b|\brounded-br\b|float-left\b|float-right\b'
+
+          # Run ripgrep:
+          # - search only changed files in the PR (fallback: all source files)
+          # - exclude lines containing "rtl-ok" suppression comment
+          # - show file, line number, and matching content
+          VIOLATIONS=$(rg --glob "*.tsx" --glob "*.jsx" --glob "*.css" --glob "*.vue" \
+            --line-number \
+            --no-heading \
+            --color never \
+            "$PATTERN" \
+            src/ components/ pages/ app/ styles/ 2>/dev/null \
+            | grep -v "rtl-ok" \
+            | grep -v "//.*rtl-ok" \
+            || true)
+
+          if [ -z "$VIOLATIONS" ]; then
+            echo "violations_found=false" >> "$GITHUB_OUTPUT"
+            echo "violation_count=0" >> "$GITHUB_OUTPUT"
+          else
+            COUNT=$(echo "$VIOLATIONS" | wc -l | tr -d ' ')
+            echo "violations_found=true" >> "$GITHUB_OUTPUT"
+            echo "violation_count=$COUNT" >> "$GITHUB_OUTPUT"
+            # Store violations in a file for use in later steps
+            echo "$VIOLATIONS" > /tmp/rtl-violations.txt
+          fi
+
+      - name: Generate violation report
+        if: steps.rtl-scan.outputs.violations_found == 'true'
+        id: report
+        run: |
+          COUNT="${{ steps.rtl-scan.outputs.violation_count }}"
+          VIOLATIONS=$(cat /tmp/rtl-violations.txt)
+
+          echo "## RTL Violations Found — Fix Before Merge" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**${COUNT} violation(s) detected.** Physical direction classes break Arabic and Hebrew layouts." >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Violations" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+
+          # Format each violation with the recommended replacement
+          while IFS= read -r line; do
+            FILE_LINE=$(echo "$line" | cut -d: -f1-2)
+            CONTENT=$(echo "$line" | cut -d: -f3-)
+
+            # Determine the replacement hint
+            HINT=""
+            if echo "$CONTENT" | grep -qE '\bml-'; then HINT="→ use ms-* (margin-inline-start)"; fi
+            if echo "$CONTENT" | grep -qE '\bmr-'; then HINT="→ use me-* (margin-inline-end)"; fi
+            if echo "$CONTENT" | grep -qE '\bpl-'; then HINT="→ use ps-* (padding-inline-start)"; fi
+            if echo "$CONTENT" | grep -qE '\bpr-'; then HINT="→ use pe-* (padding-inline-end)"; fi
+            if echo "$CONTENT" | grep -qE 'text-left'; then HINT="→ use text-start"; fi
+            if echo "$CONTENT" | grep -qE 'text-right'; then HINT="→ use text-end"; fi
+            if echo "$CONTENT" | grep -qE 'border-l-'; then HINT="→ use border-s-* (border-inline-start)"; fi
+            if echo "$CONTENT" | grep -qE 'border-r-'; then HINT="→ use border-e-* (border-inline-end)"; fi
+            if echo "$CONTENT" | grep -qE 'rounded-tl'; then HINT="→ use rounded-ss-* (border-start-start-radius)"; fi
+            if echo "$CONTENT" | grep -qE 'rounded-tr'; then HINT="→ use rounded-se-* (border-start-end-radius)"; fi
+            if echo "$CONTENT" | grep -qE 'rounded-bl'; then HINT="→ use rounded-es-* (border-end-start-radius)"; fi
+            if echo "$CONTENT" | grep -qE 'rounded-br'; then HINT="→ use rounded-ee-* (border-end-end-radius)"; fi
+            if echo "$CONTENT" | grep -qE 'float-left'; then HINT="→ use float-start"; fi
+            if echo "$CONTENT" | grep -qE 'float-right'; then HINT="→ use float-end"; fi
+
+            echo "${FILE_LINE}  ${HINT}" >> $GITHUB_STEP_SUMMARY
+          done <<< "$VIOLATIONS"
+
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### How to fix" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          echo "# In Claude Code:" >> $GITHUB_STEP_SUMMARY
+          echo "/rtl-fix" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "# Or with sed (preview first):" >> $GITHUB_STEP_SUMMARY
+          echo "# grep -rn 'ml-[0-9]' src/ | grep -v rtl-ok" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "> To suppress a line intentionally: add \`// rtl-ok — reason\` comment. Requires \`dir=\"ltr\"\` on the element or ancestor." >> $GITHUB_STEP_SUMMARY
+
+          # Also write to console for visibility in raw logs
+          echo ""
+          echo "=========================================="
+          echo "RTL violations found — fix before merge:"
+          echo "=========================================="
+          echo ""
+          cat /tmp/rtl-violations.txt
+          echo ""
+          echo "${COUNT} violation(s). Run /rtl-fix to auto-convert."
+          echo "Add // rtl-ok to suppress intentionally directional lines."
+          echo ""
+
+      - name: Post PR comment on first violation
+        if: steps.rtl-scan.outputs.violations_found == 'true' && github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const count = ${{ steps.rtl-scan.outputs.violation_count }};
+            const body = [
+              `## RTL Check Failed — ${count} violation(s) found`,
+              '',
+              'Physical direction classes (`ml-`, `mr-`, `pl-`, `pr-`, `text-left`, `text-right`, `border-l-`, `border-r-`, `float-left`, `float-right`) break Arabic and Hebrew layouts.',
+              '',
+              '**Fix:** Run `/rtl-fix` in Claude Code, or see the [full class mapping](https://github.com/${{ github.repository }}/blob/main/cheatsheet/tailwind-rtl.md).',
+              '',
+              '**Suppress a specific line** by adding `// rtl-ok — reason` comment (requires `dir="ltr"` on element or ancestor).',
+              '',
+              'See the **Checks** tab for the full violation list with line numbers.',
+            ].join('\n');
+
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body,
+            });
+
+      - name: Fail if violations found
+        if: steps.rtl-scan.outputs.violations_found == 'true'
+        run: |
+          echo "RTL check failed with ${{ steps.rtl-scan.outputs.violation_count }} violation(s)."
+          echo "See the step summary for the full list and fix instructions."
+          exit 1
+
+      - name: Pass — no violations
+        if: steps.rtl-scan.outputs.violations_found == 'false'
+        run: |
+          echo "RTL check passed — all direction classes use logical properties."
+          echo "## RTL Check Passed" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "All direction classes use logical properties. No physical direction classes detected." >> $GITHUB_STEP_SUMMARY
